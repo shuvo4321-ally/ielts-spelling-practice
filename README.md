@@ -19,7 +19,7 @@ A typed spelling test for **IELTS Listening**, built on a list of 1,128 common w
 | Mode | What it does |
 |---|---|
 | **Daily review** | 40 words (or 20 or 60): your mistakes and due words first, then new words. |
-| **Exam test** | 40 words, each said once with one replay, no hints and no feedback until the end. Results, then the fix drill for what you missed. |
+| **Exam test** | 40 words, each said once with one replay, no hints and no feedback until the end. Every test is a new set: no word is repeated from an earlier test until all 1,128 have been used (28 full tests), then a new round starts. Results, then the fix drill for what you missed. |
 | **Retest my mistakes** | Type again every word you got wrong and have not yet mastered. |
 | **Practise by category** | Any of the 18 categories, in 10, 20, 40 or all words; mistakes and new words first, random, or A to Z. |
 | **My mistakes** | Every missed word with the wrong versions you typed, and your most common error types. |

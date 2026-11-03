@@ -161,7 +161,7 @@ const app = $('#app');
 
 /* ================================================================ saved state (this browser only) */
 const KEY = 'ielts-spelling-lab-v1';
-const DEF = { w: {}, err: {}, days: {}, exam: [], set: { voice: '', rate: 0.8, prompt: 'hear', flash: 2, size: 40 } };
+const DEF = { w: {}, err: {}, days: {}, exam: [], examUsed: [], examN: 0, examRound: 1, set: { voice: '', rate: 0.8, prompt: 'hear', flash: 2, size: 40 } };
 let S = JSON.parse(JSON.stringify(DEF));
 try { const raw = JSON.parse(localStorage.getItem(KEY) || 'null'); if (raw) { S = Object.assign(S, raw); S.set = Object.assign({}, DEF.set, raw.set || {}); } } catch (e) {}
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
@@ -311,6 +311,17 @@ function pickSmart(n) {
   let out = due.slice(0, n); if (out.length < n) out = out.concat(shuffle(fresh).slice(0, n - out.length)); if (out.length < n) out = out.concat(shuffle(rest).slice(0, n - out.length));
   return shuffle(out);
 }
+/* Exam test: 40 words that no earlier exam test has asked. When fewer than 40 unused words remain, the test takes them and
+   starts the next round with fresh words, so a round of 1,128 words gives 28 full tests and then a mixed one. */
+function pickExam() {
+  const used = new Set(S.examUsed), pool = [];
+  for (let i = 0; i < N; i++) if (!used.has(i)) pool.push(i);
+  if (pool.length >= 40) return shuffle(pool).slice(0, 40);
+  const taken = new Set(pool), rest = [];
+  for (let i = 0; i < N; i++) if (!taken.has(i)) rest.push(i);
+  S.examUsed = []; S.examRound++; save();
+  return shuffle(pool.concat(shuffle(rest).slice(0, 40 - pool.length)));
+}
 function pickCat(c, count, order) {
   const cat = D.cats[c]; let ids = []; for (let i = cat.start; i < cat.end; i++) ids.push(i);
   if (order === 'abc') return ids.slice(0, count);
@@ -339,6 +350,7 @@ function submit(typed, dontKnow) {
   if (sess.phase !== 'ask') return;
   const id = sess.cur.id, retry = sess.cur.retry, ok = !dontKnow && isCorrect(id, typed), first = !retry;
   clearTimeout(timer);
+  if (first && sess.exam && S.examUsed.indexOf(id) < 0) S.examUsed.push(id);
   if (first) { sess.first[id] = ok && !sess.hinted; if (ok && !sess.hinted) sess.correct++; sess.rows.push({ id, typed: dontKnow ? '' : typed, ok: ok && !sess.hinted, hinted: sess.hinted && ok }); }
   note(id, ok, first, sess.hinted, dontKnow ? '' : typed);
   if (ok) {
@@ -375,12 +387,12 @@ function viewHome() {
     '<div class="stats"><div class="stat"><div class="n">' + s.mast + '<span class="small"> / ' + N.toLocaleString('en') + '</span></div><div class="t">Mastered</div></div><div class="stat"><div class="n">' + s.seen + '</div><div class="t">Words tried</div></div>' +
     '<div class="stat"><div class="n">' + mi + '</div><div class="t">To fix</div></div><div class="stat"><div class="n">' + s.dueN + '</div><div class="t">Due today</div></div><div class="stat"><div class="n">' + s.streak + '</div><div class="t">Day streak</div></div></div>' +
     '<div class="modes"><button class="mode" id="m-smart"><b>Daily review (' + size + ' words)</b>Your mistakes and due words first, then new ones. Do this every day.<span class="small">Listen and type</span></button>' +
-    '<button class="mode gold" id="m-exam"><b>Exam test (40 words)</b>Like the real test: each word is said once, one replay, no hints, no feedback. Results and fixes at the end.<span class="small">Best score: ' + (S.exam.length ? Math.max.apply(null, S.exam) + ' / 40' : 'not taken yet') + '</span></button>' +
+    '<button class="mode gold" id="m-exam"><b>Exam test ' + (S.examN + 1) + ' (40 new words)</b>Like the real test: each word is said once, one replay, no hints, no feedback. Every test is a new set that no earlier test has asked.<span class="small">' + (N - S.examUsed.length).toLocaleString('en') + ' words not yet in a test · round ' + S.examRound + ' · best score: ' + (S.exam.length ? Math.max.apply(null, S.exam) + ' / 40' : 'not taken yet') + '</span></button>' +
     '<button class="mode red" id="m-mist"' + (mi ? '' : ' disabled') + '><b>Retest my mistakes</b>' + (mi ? mi + ' word' + (mi > 1 ? 's' : '') + ' you got wrong and have not mastered yet.' : 'Nothing to fix yet. Mistakes appear here.') + '<span class="small">Type each one again</span></button></div>' +
     '<h2>Practise by category</h2><div class="cats">' + D.cats.map((c, i) => { const b = catBar(i); return '<button class="cat" data-cat="' + i + '"><span class="ct"><i>' + (i + 1) + '</i>' + esc(c.short) + '</span>' + b.html + '<span class="cn">' + b.m + ' mastered · ' + b.n + ' words</span></button>'; }).join('') + '</div>' +
     errBlock() + '<p class="small" style="margin-top:18px">Your progress is saved in this browser only. Words come from your PDF “IELTS Listening Spelling Mastery”.</p>';
   $('#m-smart').onclick = () => startSession('smart', pickSmart(S.set.size));
-  $('#m-exam').onclick = () => startSession('exam', pickSmart(40), { exam: true });
+  $('#m-exam').onclick = () => startSession('exam', pickExam(), { exam: true, tn: S.examN + 1 });
   const mm = $('#m-mist'); if (mm && !mm.disabled) mm.onclick = () => startSession('mistakes', mistakeIds().slice(0, 40));
   $$('[data-cat]').forEach(b => { b.onclick = () => { location.hash = '#setup/' + b.dataset.cat; }; });
 }
@@ -486,11 +498,11 @@ document.addEventListener('keydown', e => {
 function viewResults() {
   head(''); clearTimeout(timer);
   const done = sess.rows.length, ok = sess.rows.filter(r => r.ok).length, miss = sess.rows.filter(r => !r.ok), mins = Math.max(1, Math.round((Date.now() - sess.t0) / 60000));
-  if (sess.exam && done) { S.exam.push(ok); S.exam = S.exam.slice(-20); save(); }
+  if (sess.exam && done) { S.exam.push(ok); S.exam = S.exam.slice(-20); if (done >= sess.total) S.examN = Math.max(S.examN, sess.tn || 0); save(); }
   const pct = done ? Math.round(ok / done * 100) : 0, cls = pct >= 90 ? 'good' : pct >= 70 ? 'mid' : 'low';
   const types = {}; miss.forEach(r => { const best = closest(r.id, r.typed || ''), c = classify(r.typed || '', best); types[c.type] = (types[c.type] || 0) + 1; });
-  let h = '<div class="hero"><h1>' + (sess.exam ? 'Exam test results' : 'Session complete') + '</h1></div><div class="result ' + cls + '"><span class="big">' + ok + '<span> / ' + done + '</span></span> &nbsp; first-time correct (' + pct + '%) · about ' + mins + ' min' +
-    (sess.exam ? '<br><span class="small">In the real test every misspelled word scores zero, so this is your Listening spelling score.</span>' : '') + '</div>';
+  let h = '<div class="hero"><h1>' + (sess.exam ? 'Exam test ' + sess.tn + ' results' : 'Session complete') + '</h1></div><div class="result ' + cls + '"><span class="big">' + ok + '<span> / ' + done + '</span></span> &nbsp; first-time correct (' + pct + '%) · about ' + mins + ' min' +
+    (sess.exam ? '<br><span class="small">In the real test every misspelled word scores zero, so this is your Listening spelling score. The next exam test will be a new set of 40 words.</span>' : '') + '</div>';
   if (Object.keys(types).length) h += '<div class="card"><b>What went wrong</b><div class="errs" style="margin-top:8px">' + Object.keys(types).sort((a, b) => types[b] - types[a]).map(k => '<div class="erow"><span>' + LABEL[k] + '</span><span class="bar"><i style="width:' + (types[k] / miss.length * 100) + '%"></i></span><b>' + types[k] + '</b></div>').join('') + '</div></div>';
   if (miss.length) {
     h += '<h2>Words to fix (' + miss.length + ')</h2>' + miss.map(r => { const best = closest(r.id, r.typed || ''), tr = traps(best); return '<div class="card"><div class="trap">' + tr.html + '</div><div class="legend">' + tr.legend + '</div>' + (r.hinted ? '<p class="small" style="margin:0">You needed a hint on this one, so it counts as a word to practise.</p>' : diffHTML(r.typed || '', best)) + '</div>'; }).join('');
